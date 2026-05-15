@@ -15,9 +15,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import logging
 
+from .population_pool import PopulationPool, SelectionStrategy
+
 if TYPE_CHECKING:
     from .fitness_tracker import FitnessTracker
-    from .population_pool import PopulationPool, SelectionStrategy
 
 logger = logging.getLogger("hermes.mstar.evolution_engine")
 
@@ -239,7 +240,7 @@ class EvolutionEngine:
             old_fitness = program.fitness_score
 
             # 选择变异类型
-            mutation_type = mutator.select_mutation_type(program)
+            mutation_type = mutator._select_mutation_type(program)
 
             # 执行变异（Phase 1: 支持 crossover_parents）
             parent_program = None
@@ -256,27 +257,40 @@ class EvolutionEngine:
             # 质量门检查
             gate_report = gates.run_all(mutated)
 
-            if not gate_report.all_passed and not gate_report.passed():
-                logger.debug(f"Quality gates failed for {program.id}")
+            if not gate_report.all_passed and not gate_report.passed:
+                logger.debug(f"Quality gates failed for {program.program_id}")
                 return None
 
             # 保存变异后的 program
             self.fitness_tracker._save_skill(mutated)
 
-            # 使 RTK 缓存失效
-            from .rtk.rtk_optimizer import get_rtk_optimizer
-            rtk = get_rtk_optimizer()
-            rtk.invalidate_skill(program.id)
+            # 使 RTK 缓存失效 (跳过如果 RTK 不可用)
+            try:
+                from hermes_mstar.rtk.rtk_optimizer import get_rtk_optimizer
+                rtk = get_rtk_optimizer()
+                rtk.invalidate_skill(program.program_id)
+            except Exception:
+                pass  # RTK not available, skip cache invalidation
 
             new_fitness = mutated.fitness_score
             improvement = new_fitness - old_fitness
 
-            logger.info(f"Evolved {program.id}: {old_fitness:.3f} -> {new_fitness:.3f} "
+            logger.info(f"Evolved {program.program_id}: {old_fitness:.3f} -> {new_fitness:.3f} "
                        f"(+{improvement:.3f}, type={mutation_type})")
 
+            # 记录变异事件到 DB
+            self.fitness_tracker.record_mutation(
+                parent_id=program.program_id,
+                child_id=mutated.program_id,
+                mutation_type=mutation_type.value if hasattr(mutation_type, 'value') else str(mutation_type),
+                fitness_before=old_fitness,
+                fitness_after=new_fitness,
+                details={"improvement": improvement}
+            )
+
             return {
-                "program_id": program.id,
-                "new_program_id": mutated.id,
+                "program_id": program.program_id,
+                "new_program_id": mutated.program_id,
                 "old_fitness": old_fitness,
                 "new_fitness": new_fitness,
                 "improvement": improvement,
