@@ -264,6 +264,12 @@ class EvolutionEngine:
             # 保存变异后的 program
             self.fitness_tracker._save_skill(mutated)
 
+            # 立即激活变异子代 — MSTARMutator 默认设为 EVALUATING,
+            # 但通过质量门后应该进入 ACTIVE 状态接受真实执行反馈
+            from hermes_mstar.memory_program import ProgramStatus
+            mutated.status = ProgramStatus.ACTIVE
+            self.fitness_tracker._save_skill(mutated)
+
             # 使 RTK 缓存失效 (跳过如果 RTK 不可用)
             try:
                 from hermes_mstar.rtk.rtk_optimizer import get_rtk_optimizer
